@@ -16,7 +16,8 @@ TMP=$(mktemp -d)
 ./scripts/create-extents.sh "$INPUT" "$OUT_TILES/$ID.geojson"
 # create the preview PMTiles archive for that data
 ./scripts/create-pmtiles.sh "$INPUT" "$OUT_TILES/$ID.pmtiles"
-# update the H3 index with the new data
-npx tsx ./scripts/create-h3-index.mts "$OUT_TILES/$ID.geojson" "$OUT_INDEX"
+# update the index with the new data
+npx tsx ./scripts/update-index.mts "$OUT_TILES/$ID.geojson" "$OUT_TILES/$ID.pmtiles" "$OUT_INDEX"
+# npx tsx ./scripts/create-h3-index.mts "$OUT_TILES/$ID.geojson" "$OUT_INDEX"
 
 rm -r "$TMP"

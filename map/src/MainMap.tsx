@@ -1,88 +1,42 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import maplibregl, { GeoJSONSource } from "maplibre-gl";
-import * as h3 from "h3-js";
-import { area as turfArea } from "@turf/area";
+import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Protocol } from "pmtiles";
-import { lngLatBoundsToGeoJSON } from "./lib/geo_helpers";
 
 const pmtilesProtocol = new Protocol();
 maplibregl.addProtocol("pmtiles", pmtilesProtocol.tile);
-
-const calculateH3Res = (bounds: GeoJSON.Polygon) => {
-  const boundsArea = turfArea(bounds);
-  for (let res = 9; res >= 0; res--) {
-    const cellArea = h3.getHexagonAreaAvg(res, h3.UNITS.m2);
-    if (boundsArea / cellArea < 8) {
-      return res;
-    }
+maplibregl.addProtocol("oom-files", async (params, abort) => {
+  const prefix = import.meta.env.VITE_FILES_URL;
+  const inputUrl = new URL(params.url);
+  const pathname = inputUrl.pathname.replace(/^\/+/, "");
+  const url = `${prefix}/${pathname}`;
+  const response = await fetch(url, { signal: abort.signal });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: ${response.statusText}`);
   }
-  return 0;
-};
+  if (params.type === "json") {
+    let text = await response.text();
+    text = text.replace(/"oom-files:\/\/\//g, `"${prefix}/`);
+    return {
+      data: JSON.parse(text),
+    };
+  } else if (params.type === "string") {
+    return {
+      data: await response.text(),
+    };
+  } else if (params.type === "arrayBuffer") {
+    return {
+      data: await response.arrayBuffer(),
+    };
+  } else {
+    throw new Error(`Unknown type: ${params.type}`);
+  }
+});
 
 const MainMap: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loadedMap, setLoadedMap] = useState<maplibregl.Map | undefined>(undefined);
-  const [tilesets, setTilesets] = useState<string[]>([]);
-
-  const loadIndex = useCallback(async (map: maplibregl.Map) => {
-    const bounds = lngLatBoundsToGeoJSON(map.getBounds());
-    const zoom = map.getZoom();
-    const res = calculateH3Res(bounds);
-    const currentCells = h3.polygonToCells(bounds.coordinates, res, true);
-    const cellsWithBuffer = new Set<string>();
-    for (const cell of currentCells) {
-      cellsWithBuffer.add(cell);
-      const neighbors = h3.gridDisk(cell, 1);
-      for (const neighbor of neighbors) {
-        cellsWithBuffer.add(neighbor);
-      }
-    }
-    console.log(`Using H3 res ${res} for zoom=${zoom}, ${currentCells.length} cells, ${cellsWithBuffer.size} cells with buffer`);
-
-    const src = map.getSource("index") as GeoJSONSource;
-    src.updateData({ removeAll: true });
-    const loadIndexes: Promise<void>[] = [];
-    const tilesetIds: Set<string> = new Set();
-    for (const cell of cellsWithBuffer) {
-      const cellGeom = h3.cellToBoundary(cell, true);
-      const cellFeature: GeoJSON.Feature = {
-        type: "Feature",
-        id: cell,
-        properties: {
-          cell,
-        },
-        geometry: {
-          type: "Polygon",
-          coordinates: [cellGeom],
-        },
-      };
-      src.updateData({
-        add: [cellFeature],
-      });
-      loadIndexes.push((async () => {
-        const index = await fetch(`${import.meta.env.VITE_FILES_URL}/api/v1/index/${cell}.json`);
-        if (index.status !== 200) { return; }
-        const indexJson = await index.json();
-        src.updateData({
-          update: [
-            {
-              id: cell,
-              addOrUpdateProperties: [
-                { key: "count", value: indexJson.count },
-              ]
-            },
-          ],
-        });
-        for (const tilesetId of indexJson.tilesets) {
-          tilesetIds.add(tilesetId);
-        }
-      })());
-    }
-    await Promise.all(loadIndexes);
-    console.log(`Detected ${tilesetIds.size} tilesets`);
-    setTilesets(Array.from(tilesetIds));
-  }, []);
+  const [tilesets, setTilesets] = useState<Set<string>>(new Set());
 
   useLayoutEffect(() => {
     if (!containerRef.current) {
@@ -123,14 +77,29 @@ const MainMap: React.FC = () => {
     }
   }, []);
 
+  const refreshVisibleTilesets = useCallback((map: maplibregl.Map) => {
+    const visibleExtents = map.queryRenderedFeatures({
+      layers: ["index/fill"],
+    });
+    console.log('currently visible:', visibleExtents.map((f) => f.properties?.tileset));
+    const tilesets = new Set(visibleExtents.map((f) => f.properties?.tileset).filter((tileset) => tileset) as string[]);
+    setTilesets((prev) => {
+      //@ts-ignore
+      if (prev.size === tilesets.size && prev.size === prev.union(tilesets).size) {
+        return prev;
+      }
+      return tilesets;
+    });
+  }, []);
+
   useEffect(() => {
     if (!loadedMap) return;
 
-    loadIndex(loadedMap);
+    refreshVisibleTilesets(loadedMap);
     loadedMap.on('moveend', () => {
-      loadIndex(loadedMap);
+      refreshVisibleTilesets(loadedMap);
     });
-  }, [loadIndex, loadedMap]);
+  }, [refreshVisibleTilesets, loadedMap]);
 
   useEffect(() => {
     if (!loadedMap) return;

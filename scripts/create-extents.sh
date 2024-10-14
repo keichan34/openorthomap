@@ -18,7 +18,7 @@ gdalwarp -t_srs EPSG:3857 "$INPUT" "$PROJECTED"
 
 # make a mask of the input data
 MASK="$TMP/$INPUT_B.mask.tif"
-gdal_calc -A "$PROJECTED" --outfile="$MASK" --calc="A>0"
+gdal_calc.py -A "$PROJECTED" --outfile="$MASK" --calc="A>0"
 
 # resample so the output resolution is 1mx1m
 RESAMPLE="$TMP/$INPUT_B.resample.tif"
@@ -26,7 +26,7 @@ gdalwarp -tr 1 1 "$MASK" "$RESAMPLE"
 
 # Convert to GeoJSON
 GEOJSON="$TMP/$INPUT_B.mask.geojson"
-gdal_polygonize "$RESAMPLE" -f "GeoJSON" "$GEOJSON"
+gdal_polygonize.py "$RESAMPLE" -f "GeoJSON" "$GEOJSON"
 
 # Calculate the convex hull, simplify it, reproject to EPSG:4326, then output it
 HULL="$TMP/$INPUT_B.hull.geojson"
