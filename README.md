@@ -1,15 +1,21 @@
-# openorthomap
+# OpenOrthoMap
 
-Scripts to manage and update a catalog of raster tilesets.
+Tools for creating / maintaining an [OpenOrthoMap](https://www.openorthomap.org) instance.
 
 ## Basic Architecture
 
-Each raster tileset is managed as a PMTiles archive. The extent of the tileset is created as a simple vector polygon, exported, and added to the index. The index consists of Mapbox Vector Tile (MVT) files, and the extent corresponding to the raster tileset is added to the MVT index.
+* [The Catalog](https://www.openorthomap.org/posts/2024-11-catalog/)
+* The Data
+  * Each raster tileset is managed as a PMTiles archive. The extent of the tileset is created as a simple vector polygon, exported, and added to the index. The index consists of Mapbox Vector Tile (MVT) files, and the extent corresponding to the raster tileset is added to the MVT index.
 
-## Updating the Index
+## Developing
+
+TODO
+
+## Adding a new tileset
 
 ```
-$ scripts/process-geotiff.sh [inputGeoTIFF]
+$ updater [inputGeoTIFF]
 ```
 
-The index will be in `./api/v1/index/{z}/{x}/{y}.pbf`, and the PMTiles archives will be in `./api/v1/tiles/{tilesetId}.pmtiles`.
+These tools assume the API is located in `$PWD/api/v1/`: the catalog will be in `/api/v1/catalog/{cell id}.csv`, and files will be in `/api/v1/files/{file ID}.{ext}`
