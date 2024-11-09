@@ -1,4 +1,4 @@
-use catalog::catalog_file::SingleFile;
+use catalog;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -19,7 +19,8 @@ struct Args {
     input: Vec<PathBuf>,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     let root_dir = args.root_dir.unwrap_or_else(|| PathBuf::from("."));
     let api_dir = root_dir.join("api/v1");
@@ -31,20 +32,9 @@ fn main() {
             println!("Unsupported file type: {:?}, skipping", extname);
             continue;
         }
-        let geojson_path = input.with_extension("geojson");
-        if !geojson_path.exists() {
-            println!(
-                "GeoJSON file not found for PMTiles file: {:?}, skipping",
-                input
-            );
-            continue;
-        }
-        println!("GeoJSON file found: {:?}", geojson_path);
-
-        let file = SingleFile::new(1, input.to_string_lossy().to_string());
-        let geojson = std::fs::read_to_string(geojson_path).unwrap();
-        match catalog::update_catalog(file, geojson, api_dir.clone()) {
-            Ok(_) => println!("Catalog updated successfully"),
+        let res = catalog::update_catalog(input.clone(), api_dir.clone()).await;
+        match res {
+            Ok(_) => println!("Added {} to catalog", input.display()),
             Err(e) => eprintln!("Error updating catalog: {:?}", e),
         }
     }

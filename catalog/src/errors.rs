@@ -15,6 +15,15 @@ pub enum Error {
     #[error("An error occurred while parsing an integer: `{0}`")]
     ParseIntError(#[from] std::num::ParseIntError),
 
+    #[error("An error occurred while parsing a float: `{0}`")]
+    ParseFloatError(#[from] std::num::ParseFloatError),
+
+    #[error("An error occurred while accessing the PMTiles archive: `{0}`")]
+    PMTilesError(#[from] pmtiles::PmtError),
+
+    #[error("An error occurred while parsing JSON: `{0}`")]
+    JSONError(#[from] serde_json::Error),
+
     #[error("CatalogFile must be parsed first before accessing its contents")]
     CatalogFileNotParsed,
 

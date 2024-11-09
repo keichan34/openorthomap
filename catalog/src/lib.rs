@@ -1,34 +1,29 @@
 pub mod catalog_file;
 mod errors;
 mod geojson_utils;
+mod hash_utils;
+pub mod input_file;
 mod s2_utils;
 
+use catalog_file::CatalogFile;
+use input_file::InputFile;
 use std::path::PathBuf;
-
-use catalog_file::{CatalogFile, SingleFile};
-use s2::cellid::CellID;
 
 use crate::errors::Result;
 
-fn geojson_to_s2_cells(geojson: String) -> Result<Vec<CellID>> {
-    let union = geojson_utils::geojson_to_union(geojson)?;
-    Ok(s2_utils::covering_s2_cells(&union))
-}
+pub async fn update_catalog(file: PathBuf, api_prefix: PathBuf) -> Result<()> {
+    // Read the input file
+    let file = InputFile::new(file).await?;
+    // copy it to the API
+    file.copy_to_api(api_prefix.clone()).await?;
 
-pub fn update_catalog(
-    file: SingleFile,
-    file_outline_geojson: String,
-    api_prefix: PathBuf,
-) -> Result<()> {
-    let s2_cells = geojson_to_s2_cells(file_outline_geojson)?;
-
-    for cell in s2_cells {
+    for cell in &file.s2_cells {
         let catalog_filename = format!("{}.csv", cell.to_token());
-        let catalog_path = api_prefix.join(catalog_filename);
+        let catalog_path = api_prefix.join("catalog").join(catalog_filename);
         println!("Catalog path: {:?}", catalog_path);
         let mut catalog = CatalogFile::new(catalog_path);
         catalog.read()?;
-        catalog.add_file(file.clone())?;
+        catalog.add_file(&file)?;
         catalog.write()?;
     }
 

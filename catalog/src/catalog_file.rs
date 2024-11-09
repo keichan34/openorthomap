@@ -1,43 +1,52 @@
-use crate::errors::{Error, Result};
+use crate::{
+    errors::{Error, Result},
+    input_file::InputFile,
+    s2_utils,
+};
 use csv::{ReaderBuilder, WriterBuilder};
+use s2::cellid::CellID;
 use std::{fs, path::PathBuf};
 
 #[derive(Debug)]
 enum MetadataValue {
     Version(u8),
     Count(u64),
-    SubcellCount(u8, u64),
 }
 
 #[derive(Debug, Clone)]
 pub struct SingleFile {
     kind: u8,
-    filename: String,
+    display_name: String,
+    hash: String,
+    coverage: f64,
 }
 
 impl SingleFile {
-    pub fn new(kind: u8, filename: String) -> Self {
-        SingleFile { kind, filename }
+    fn new_within_catalog(catalog: &ParsedCatalogFile, file: &InputFile) -> Self {
+        let polygon = &file.outline;
+        let coverage = s2_utils::coverage_of_cell(polygon, &catalog.cell_id);
+        let hash = file.hash.clone();
+        SingleFile {
+            kind: 1,
+            display_name: file.display_name.clone(),
+            hash,
+            coverage,
+        }
     }
 }
 
 #[derive(Debug)]
 struct ParsedCatalogFile {
+    cell_id: CellID,
     metadata: Vec<MetadataValue>,
     files: Vec<SingleFile>,
 }
 
 impl ParsedCatalogFile {
-    fn new() -> Self {
+    fn new(cell_id: CellID) -> Self {
         ParsedCatalogFile {
-            metadata: vec![
-                MetadataValue::Version(1),
-                MetadataValue::Count(0),
-                // MetadataValue::SubcellCount(0, 0),
-                // MetadataValue::SubcellCount(1, 0),
-                // MetadataValue::SubcellCount(2, 0),
-                // MetadataValue::SubcellCount(3, 0),
-            ],
+            cell_id,
+            metadata: vec![MetadataValue::Version(1), MetadataValue::Count(0)],
             files: Vec::new(),
         }
     }
@@ -51,14 +60,23 @@ impl ParsedCatalogFile {
 
 pub struct CatalogFile {
     file_path: PathBuf,
+    cell_id: CellID,
     parsed_file: Option<ParsedCatalogFile>,
 }
 
 impl CatalogFile {
     pub fn new(file: PathBuf) -> Self {
+        let cell_token = file
+            .file_stem()
+            .expect("No file stem found")
+            .to_str()
+            .expect("Could not convert file stem to string");
+        let cell_id = CellID::from_token(cell_token);
+
         CatalogFile {
             file_path: file,
             parsed_file: None,
+            cell_id,
         }
     }
 
@@ -83,29 +101,29 @@ impl CatalogFile {
                         let count = record.get(2).ok_or("No count found")?;
                         metadata.push(MetadataValue::Count(count.parse()?));
                     }
-                    Some("subcell-count") => {
-                        let sub_index = record.get(2).ok_or("No subcell index found")?;
-                        let count = record.get(3).ok_or("No count found")?;
-                        metadata.push(MetadataValue::SubcellCount(
-                            sub_index.parse()?,
-                            count.parse()?,
-                        ));
-                    }
                     _ => (),
                 },
                 Some("file") => {
                     let kind = record.get(1).ok_or("No kind found")?;
-                    let filename = record.get(2).ok_or("No filename found")?;
+                    let display_name = record.get(2).ok_or("No display name found")?;
+                    let hash = record.get(3).ok_or("No hash found")?;
+                    let coverage = record.get(4).ok_or("No coverage found")?;
                     files.push(SingleFile {
                         kind: kind.parse()?,
-                        filename: filename.to_string(),
+                        display_name: display_name.to_string(),
+                        hash: hash.to_string(),
+                        coverage: coverage.parse()?,
                     });
                 }
                 _ => (),
             }
         }
 
-        self.parsed_file = Some(ParsedCatalogFile { metadata, files });
+        self.parsed_file = Some(ParsedCatalogFile {
+            cell_id: self.cell_id,
+            metadata,
+            files,
+        });
         Ok(())
     }
 
@@ -116,7 +134,7 @@ impl CatalogFile {
         match self.parse_file() {
             Ok(_) => Ok(()),
             Err(Error::CSVError(_)) => {
-                self.parsed_file = Some(ParsedCatalogFile::new());
+                self.parsed_file = Some(ParsedCatalogFile::new(self.cell_id));
                 Ok(())
             }
             Err(e) => Err(e),
@@ -146,12 +164,6 @@ impl CatalogFile {
                 MetadataValue::Count(count) => {
                     vec!["meta".to_string(), "count".to_string(), count.to_string()]
                 }
-                MetadataValue::SubcellCount(sub_index, count) => vec![
-                    "meta".to_string(),
-                    "subcell-count".to_string(),
-                    sub_index.to_string(),
-                    count.to_string(),
-                ],
             };
             wtr.write_record(record)?;
         }
@@ -160,7 +172,9 @@ impl CatalogFile {
             wtr.write_record(vec![
                 "file".to_string(),
                 file.kind.to_string(),
-                file.filename.clone(),
+                file.display_name.clone(),
+                file.hash.clone(),
+                file.coverage.to_string(),
             ])?;
         }
 
@@ -178,22 +192,33 @@ impl CatalogFile {
         self.write_to(file_path)
     }
 
-    pub fn add_file(&mut self, file: SingleFile) -> Result<()> {
+    pub fn add_file(&mut self, file: &InputFile) -> Result<()> {
         let parsed_file = self
             .parsed_file
             .as_mut()
             .ok_or(Error::CatalogFileNotParsed)?;
-        if !parsed_file
-            .files
-            .iter()
-            .any(|f| f.filename == file.filename)
-        {
-            parsed_file.files.push(file);
+
+        let single_file = SingleFile::new_within_catalog(parsed_file, file);
+
+        // check if the file is already in the catalog
+        // if it is, we'll replace it with the new one
+        // if it isn't well update the count and add it to the list
+        let existing_file_idx = parsed_file.files.iter().position(|f| f.hash == file.hash);
+        if let Some(pos) = existing_file_idx {
+            parsed_file.files[pos] = single_file;
+            return Ok(());
+        } else {
             parsed_file.update_metadata(|value| match value {
                 MetadataValue::Count(count) => *count += 1,
                 _ => (),
             });
+            parsed_file.files.push(single_file);
         }
+
+        parsed_file
+            .files
+            .sort_by(|a, b| b.coverage.partial_cmp(&a.coverage).unwrap());
+
         Ok(())
     }
 }
