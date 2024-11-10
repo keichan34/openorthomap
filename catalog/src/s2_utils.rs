@@ -1,12 +1,7 @@
 use std::{collections::HashSet, usize};
 
-use geo::{polygon, BooleanOps, BoundingRect, GeodesicArea, MultiPolygon, Polygon};
-use s2::{
-    self,
-    cell::{self, Cell},
-    cellid::CellID,
-    cellunion::CellUnion,
-};
+use geo::{polygon, BooleanOps, BoundingRect, GeodesicArea, MultiPolygon};
+use s2::{self, cell::Cell, cellid::CellID, cellunion::CellUnion};
 
 const BASE_CELL_LEVEL: u8 = 12;
 
