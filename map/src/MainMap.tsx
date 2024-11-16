@@ -3,6 +3,7 @@ import maplibregl, { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Geometry } from "geojson";
 import { Protocol } from "pmtiles";
+import Papa from "papaparse";
 import { s2, geojson } from 's2js';
 import { getCellVisualization } from "./lib/s2";
 
@@ -106,31 +107,40 @@ const MainMap: React.FC = () => {
     });
     const cellUnion = regionCoverer.covering(boundPoly);
     const viz = getCellVisualization(cellUnion);
-    const cellToks = cellUnion.map((cell) => s2.cellid.toToken(cell));
+    const cellToks = cellUnion.map((cell) => {
+      const token = s2.cellid.toToken(cell);
+      const level = s2.cellid.level(cell);
+      console.log(`cell: ${token}, level: ${level}`);
+      return token;
+    });
     // console.log('cellIds:', cellToks);
     source.setData(viz);
 
+    const visibleFiles = new Set<string>();
     for (const token of cellToks) {
       const resp = await fetch(import.meta.env.VITE_FILES_URL + `/api/v1/catalog/${token}.csv`);
       if (!resp.ok) {
         continue;
       }
       const csv = await resp.text();
-      console.log('csv:', csv);
+      // console.log('csv:', csv);
+      const parsed = Papa.parse<string[]>(csv, { header: false });
+      // console.log('parsed:', parsed);
+      for (const row of parsed.data) {
+        if (row[0] !== 'file') continue;
+        visibleFiles.add(row[3]);
+      }
     }
 
-    // const visibleExtents = map.queryRenderedFeatures({
-    //   layers: ["index/fill"],
-    // });
-    // console.log('currently visible:', visibleExtents.map((f) => f.properties?.tileset));
-    // const tilesets = new Set(visibleExtents.map((f) => f.properties?.tileset).filter((tileset) => tileset) as string[]);
-    // setTilesetHashes((prev) => {
-    //   //@ts-expect-error union
-    //   if (prev.size === tilesets.size && prev.size === prev.union(tilesets).size) {
-    //     return prev;
-    //   }
-    //   return tilesets;
-    // });
+    console.log('visibleFiles:', visibleFiles);
+
+    setTilesetHashes((prev) => {
+      //@ts-expect-error union
+      if (prev.size === visibleFiles.size && prev.size === prev.union(visibleFiles).size) {
+        return prev;
+      }
+      return visibleFiles;
+    });
   }, []);
 
   useEffect(() => {

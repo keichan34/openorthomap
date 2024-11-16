@@ -8,6 +8,7 @@ const BASE_CELL_LEVEL: u8 = 12;
 fn expand_cell_parents(cells: Vec<CellID>) -> HashSet<CellID> {
     let mut expanded_cells: HashSet<CellID> = HashSet::new();
     for cell in cells {
+        expanded_cells.insert(cell);
         let current_level = cell.level();
         for level in (0..current_level).rev() {
             let parent = cell.parent(level);
@@ -19,17 +20,17 @@ fn expand_cell_parents(cells: Vec<CellID>) -> HashSet<CellID> {
 
 fn get_children_at_base(cells: Vec<CellID>) -> HashSet<CellID> {
     let mut all_children = HashSet::new();
-    // let cell: Cell = cell.into();
     for cell_id in cells {
         let cell = Cell::from(cell_id);
         if cell.level() == BASE_CELL_LEVEL {
+            // println!("Adding cell because it's at base: {:?}", cell_id.to_token());
             all_children.insert(cell_id);
             continue;
         }
 
         let children = cell.children().unwrap();
         let children_ids: Vec<CellID> = children.iter().map(|child| child.id).collect();
-        all_children.extend(children_ids);
+        all_children.extend(get_children_at_base(children_ids));
     }
     all_children
 }
@@ -116,15 +117,32 @@ mod tests {
             (x: 130.59470078699604, y: 30.33793038867809),
             (x: 130.59011515516988, y: 30.338085913448012),
         ];
-        let cells = covering_s2_cells(&polygon.into())
+        let cell_ids = covering_s2_cells(&polygon.into())
+            .into_iter()
+            .collect::<Vec<CellID>>();
+        let min_level = cell_ids
+            .iter()
+            .map(|cell| cell.level() as u8)
+            .min()
+            .unwrap();
+        let max_level = cell_ids
+            .iter()
+            .map(|cell| cell.level() as u8)
+            .max()
+            .unwrap();
+
+        assert_eq!(min_level, 0);
+        assert_eq!(max_level, BASE_CELL_LEVEL);
+
+        let cell_toks = cell_ids
             .into_iter()
             .map(|cell| cell.to_token())
             .collect::<Vec<String>>();
         let expected_cells = vec![
-            "3", "34", "35", "353", "353c", "353d", "353d204", "353d21", "353d21c", "353d24",
-            "353d3", "353d4", "354",
+            "3", "34", "35", "353", "353c", "353d", "353d203", "353d204", "353d205", "353d21",
+            "353d21b", "353d21c", "353d21d", "353d24", "353d3", "353d4", "354",
         ];
 
-        assert_eq!(expected_cells, cells);
+        assert_eq!(expected_cells, cell_toks);
     }
 }
